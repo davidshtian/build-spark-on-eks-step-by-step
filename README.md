@@ -948,4 +948,113 @@ items:
            defaultMode: 420
 ```
 
+## Appendix A. Directly Leveraging EMR Container Image
+
+Previously, it's roughly introduced how to build Spark on EKS, hope it will help understand some details. While if you would like to directly use the [optimized Spark runtime developed by EMR](https://aws.amazon.com/cn/blogs/big-data/run-apache-spark-3-0-workloads-1-7-times-faster-with-amazon-emr-runtime-for-apache-spark/), you could refer to the job below.
+
+- Submit job using EMR image (us-east-1 region)
+> Notes: EMR Spark home location is '/usr/lib/spark/'.
+
+```
+apiVersion: v1
+kind: List
+items:
+- apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: spark-py-job
+    namespace: spark
+  spec:
+    backoffLimit: 0
+    completions: 1
+    parallelism: 1
+    template:
+      metadata:
+      spec:
+        restartPolicy: Never
+        serviceAccountName: spark-sa
+        tolerations:
+        - key: "spark-memory-optimized"
+          operator: "Exists"
+          effect: "NoSchedule"
+        containers:
+        - args:
+          - --master
+          - k8s://kubernetes.default.svc
+          - --deploy-mode
+          - cluster
+          - --name
+          - spark-python
+          - --conf
+          - spark.kubernetes.namespace=spark
+          - --conf
+          - spark.executor.instances=1 
+          - --conf
+          - spark.kubernetes.container.image=755674844232.dkr.ecr.us-east-1.amazonaws.com/spark/emr-6.9.0:latest
+          - --conf
+          - spark.executor.instances=1
+          - --conf
+          - spark.executor.memory=2G
+          - --conf
+          - spark.executor.cores=1
+          - --conf
+          - spark.kubernetes.driver.podTemplateFile=/usr/lib/spark/conf/driver_pod_template.yml
+          - --conf
+          - spark.kubernetes.executor.podTemplateFile=/usr/lib/spark/conf/executor_pod_template.yml
+          - --conf
+          - spark.kubernetes.driver.podTemplateContainerName=spark-kubernetes-driver
+          - --conf
+          - spark.kubernetes.executor.podTemplateContainerName=spark-kubernetes-executors
+          - --conf
+          - spark.kubernetes.authenticate.driver.serviceAccountName=spark-sa
+          - --conf
+          - spark.kubernetes.authenticate.executor.serviceAccountName=spark-sa
+          - s3://<your s3 bucket>/scripts/wordcount.py
+          - s3://<your s3 bucket>/spark-on-eks/outputs/
+          command: ["/usr/lib/spark/bin/spark-submit"]      
+          image: 755674844232.dkr.ecr.us-east-1.amazonaws.com/spark/emr-6.9.0:latest
+          name: spark-py
+          imagePullPolicy: Always
+          volumeMounts:
+          - name: spark-pod-template-emr
+            mountPath: /usr/lib/spark/conf/driver_pod_template.yml
+            subPath: driver
+          - name: spark-pod-template-emr
+            mountPath: /usr/lib/spark/conf/executor_pod_template.yml
+            subPath: executor
+        volumes:
+        - name: spark-pod-template-emr
+          configMap:
+           name: spark-eks-pod-template-emr
+           defaultMode: 420
+```
+
+Config map ark-eks-pod-template-emr:
+
+```
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: spark-eks-pod-template-emr
+  namespace: spark
+data:
+  driver: |-
+    apiVersion: v1
+    kind: Pod
+    spec:
+      tolerations:
+        - key: "spark-memory-optimized"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+  executor: |-
+    apiVersion: v1
+    kind: Pod
+    spec:
+      tolerations:
+        - key: "spark-memory-optimized"
+          operator: "Exists"
+          effect: "NoSchedule"
+```
+
 To be updated...
